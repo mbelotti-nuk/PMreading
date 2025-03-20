@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PM 2.5 and PM 10 Monitoring</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels"></script>
+    <style>
+        body {
+            font-family: Verdana, sans-serif;
+            background-color: #f4f4f4;
+            text-align: center;
+            margin: 0;
+            padding: 20px;
+        }
+        h2 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            margin: 20px auto;
+            width: 80%;
+            max-width: 800px;
+        }
+        canvas {
+            max-width: 100%;
+        }
+        #errorLabel {
+            color: red;
+            font-size: 16px;
+            font-weight: bold;
+            display: none;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Real-Time PM 2.5 & PM 10</h2>
+        <label id="errorLabel">Sensor error: No data received</label>
+        <canvas id="realTimeChart"></canvas>
+    </div>
+
+    <div class="container">
+        <h2>Hourly Average Concentrations (Today)</h2>
+        <canvas id="hourlyChart"></canvas>
+    </div>
+
+    <div class="container">
+        <h2>Monthly Average Concentrations</h2>
+        <canvas id="monthlyChart"></canvas>
+    </div>
+
+    <script>
+        const realTimeCtx = document.getElementById('realTimeChart').getContext('2d');
+        const hourlyCtx = document.getElementById('hourlyChart').getContext('2d');
+        const monthlyCtx = document.getElementById('monthlyChart').getContext('2d');
+        const errorLabel = document.getElementById('errorLabel');
+
+        let labels = [];
+        let pm25Data = [];
+        let pm10Data = [];
+
+        const realTimeChart = new Chart(realTimeCtx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [
+                    { label: "PM 2.5 [um/cm3]", borderColor: "blue", backgroundColor: "rgba(0, 0, 255, 0.1)", data: pm25Data, fill: true },
+                    { label: "PM 10  [um/cm3]", borderColor: "red", backgroundColor: "rgba(255, 0, 0, 0.1)", data: pm10Data, fill: true }
+                ]
+            },
+            options: { responsive: true }
+        });
+
+        const socket = new WebSocket("ws://192.168.1.36:8000/ws");
+        socket.onmessage = function(event) {
+            const receivedData = JSON.parse(event.data);
+            
+            if (receivedData === null) {
+                errorLabel.style.display = "block";
+                return;
+            } 
+
+            errorLabel.style.display = "none";
+
+            labels.push(receivedData.timestamp);
+            pm25Data.push(receivedData.pm2_5);
+            pm10Data.push(receivedData.pm10);
+
+            if (labels.length > 30) {
+                labels.shift();
+                pm25Data.shift();
+                pm10Data.shift();
+            }
+
+            realTimeChart.update();
+        };
+
+        async function fetchHourlyData() {
+            const response = await fetch("http://192.168.1.36:8000/hourly_avg");
+            const hourlyData = await response.json();
+
+            if (hourlyData.length === 0) return;
+
+            const hours = hourlyData.map(d => d.hour);
+            const avgPm25 = hourlyData.map(d => d.pm2_5);
+            const avgPm10 = hourlyData.map(d => d.pm10);
+
+            new Chart(hourlyCtx, {
+                type: 'bar',
+                data: {
+                    labels: hours,
+                    datasets: [
+                        { label: "PM 2.5 Avg", backgroundColor: "blue", data: avgPm25 },
+                        { label: "PM 10 Avg", backgroundColor: "red", data: avgPm10 }
+                    ]
+                },
+            options: {
+                responsive: true,
+                scales: {
+                    y: { min: 0, max: 25, title: { display: true, text: "Concentration (µg/m³)" } }
+                },
+                plugins: {
+                    datalabels: { display: true, color: "black", anchor: "end", align: "top" }
+                }
+            },
+            });
+        }
+
+        async function fetchMonthlyData() {
+            const response = await fetch("http://192.168.1.36:8000/monthly_avg");
+            const monthlyData = await response.json();
+
+            if (monthlyData.length === 0) return;
+
+            const months = monthlyData.map(d => d.month);
+            const avgPm25 = monthlyData.map(d => d.pm2_5);
+            const avgPm10 = monthlyData.map(d => d.pm10);
+
+            new Chart(monthlyCtx, {
+                type: 'bar',
+                data: {
+                    labels: months,
+                    datasets: [
+                        { label: "PM 2.5 Avg", backgroundColor: "blue", data: avgPm25 },
+                        { label: "PM 10 Avg", backgroundColor: "red", data: avgPm10 }
+                    ]
+                },
+                options: { responsive: true }
+            });
+        }
+
+        fetchHourlyData();
+        fetchMonthlyData();
+    </script>
+</body>
+</html>
+
